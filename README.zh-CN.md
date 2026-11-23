@@ -6,7 +6,7 @@
 把公开的 AI 工具信号，变成可核查、可排序、可执行的产品机会判断。</p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-94%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-98%20passing-brightgreen">
   <img alt="LLM required" src="https://img.shields.io/badge/LLM-required-blue">
   <img alt="languages" src="https://img.shields.io/badge/languages-EN%20%7C%20ZH%20%7C%20JA%20%7C%20ES-orange">
   <img alt="python" src="https://img.shields.io/badge/python-3.11%2B-3776AB">
@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="README.md">English</a> ·
-  <a href="docs/screenshots/hero-zh.png">界面截图</a> ·
+  <a href="docs/screenshots/hero-en.png">界面截图</a> ·
   <a href="skills/openecrs_agent.md">Agent Skill</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#http-api">API</a>
@@ -48,7 +48,9 @@
 - **多语言 + 角色化**：默认跟随系统，支持 English / 中文 / 日本語 / Español；每次请求锁定输出语言，切换后不会回退成中文。
 - **历史对话保留**：刷新页面或重启服务后恢复，支持搜索、重命名、删除。
 - **干净可折叠界面**：官方 Logo、响应式侧边栏、模型切换、设置分为「模型 / 偏好设置」。
-- **可选联网搜索**：独立开关（默认关闭），用于最新新闻/竞品/监管；结果明确标注为外部网页，不混入证据评分。
+- **可选联网搜索**：独立开关（默认关闭），用于最新新闻/竞品/监管；优先本地 SearXNG，Bing 兜底；结果标注外部，不混入评分。
+- **文档/图片上传**：支持 PDF/DOCX/TXT/MD/CSV 与图片；短文档直接进上下文，长文档自动分片检索，图片用 Tesseract OCR；扫描 PDF 自动 OCR。
+- **更长的上下文记忆**：作答阶段会带上最近多轮对话，会话保留 24 轮，文档上下文扩展到 28k 字符。
 - **默认完全本地运行**：无需构建、无 CDN、无遥测；只向你配置的 LLM 端点发请求（开启联网搜索时，搜索词也会发给 Bing）。
 
 ### 设计原则
@@ -64,7 +66,7 @@
 
 | 首屏工作区 | 场景深潜 |
 |---|---|
-| ![工作区](docs/screenshots/hero-zh.png) | ![场景深潜](docs/screenshots/feature-detail.png) |
+| ![工作区](docs/screenshots/hero-en.png) | ![场景深潜](docs/screenshots/feature-detail.png) |
 
 | 决策向导 | 侧边栏与个人信息菜单 | 联网搜索 |
 |---|---|---|
@@ -89,7 +91,8 @@
 | **场景深潜** | 机会评分卡、年度趋势、来源结构、供给信号（仓库/Star/论文/Show HN）、证据摘录。 |
 | **收藏工作区** | 收藏场景、写备注，并让 Agent 对比收藏清单。 |
 | **视频搜索** | 按场景生成 YouTube / B站 外部搜索链接（明确标注外部内容、非证据库）。 |
-| **联网搜索（可选）** | 一个开关查最新新闻/竞品/监管；结果是 Bing 网页，标注外部，不参与评分。 |
+| **联网搜索（可选）** | 一个开关查最新新闻/竞品/监管；优先本地 SearXNG，Bing 兜底；标注外部，不参与评分。 |
+| **文档/图片上传** | PDF/DOCX/TXT/MD/CSV/图片；4000 token 阈值自动 light/RAG 路由，图片 OCR，片段注入对话。 |
 | **对话** | 自然语言提问：排名、场景分析、对比、证据、PoC、视频、寒暄等。 |
 | **PDF 建议书** | 一页 A4：建议、评分卡、证据、行动、风险与口径说明。 |
 
@@ -152,6 +155,19 @@ macOS 也可以双击 **`openecrs.command`**。
 
 填入 Key → **测试连接** → **保存**。Key 仅保存在 `outputs/agent_ui/settings.json`（权限 `0600`），只发送到你配置的端点；也支持 `DEEPSEEK_API_KEY`、`OPENAI_API_KEY`、`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 环境变量。
 
+### 可选：启用项目内置 SearXNG 联网搜索（无需 Docker）
+
+SearXNG 源码已内置在 `vendor/searxng/`（AGPL-3.0），原生启动：
+
+```bash
+./scripts/run_searxng.sh        # 自动创建 .searxng-venv、安装依赖、监听 http://127.0.0.1:8889
+# 验证：curl 'http://127.0.0.1:8889/search?q=test&format=json'
+```
+
+需要 Python 3.11+，首次安装依赖需要网络。引擎/端口/密钥在 `mcp/searxng/settings.yml` 配置，不依赖 Docker。
+
+`agent_web.py` 的调用顺序：**新闻 RSS**（Google News / Bing News，适合最新/监管类问题）→ **内置 SearXNG JSON**（8889，回退 8888）→ **Bing HTML**；结果会抓取网页正文清洗为文本，卡片展示完整链接。可用 `SEARXNG_URL` 指向其他实例；可选 MCP 配置见 `mcp/`。
+
 ### 方式 B — 本地微调模型
 
 ```bash
@@ -190,7 +206,7 @@ curl -s -X POST http://127.0.0.1:8765/api/pdf \
 
 | 端点 | 方法 | 说明 |
 |---|---|---|
-| `/api/chat` | POST | `{session, message, lang, role, web_search}` → 建议、说明、指标、排名、对比、证据、视频、行动、风险、引擎信息、Agent 过程 |
+| `/api/chat` | POST | `{session, message, lang, role, web_search, attachment_id}` → 建议、说明、指标、排名、对比、证据、视频、行动、风险、引擎信息、Agent 过程 |
 | `/api/pdf` | POST | `{session, lang}` → `application/pdf` 建议书 |
 | `/api/settings` | GET/POST | 读取（Key 脱敏）/ 创建或更新模型配置 |
 | `/api/active` | POST | 切换当前模型配置 |
@@ -204,6 +220,7 @@ curl -s -X POST http://127.0.0.1:8765/api/pdf \
 | `/api/poc` | POST | PoC 计划骨架 + 可选叙述 |
 | `/api/portfolio` | POST | 团队/预算组合推荐 |
 | `/api/workspace` | GET/POST | 收藏场景与备注 |
+| `/api/upload` | POST | `{name, data(base64)}` → 文档/图片解析元数据（`id`、`mode`、`tokens`、`preview`） |
 | `/api/sessions` | GET | 历史对话列表（可选 `q`） |
 | `/api/session` | GET/DELETE | 读取或删除单个对话 |
 | `/api/session/rename` | POST | 重命名对话 |
@@ -256,7 +273,8 @@ OpenECRS/
 │  ├─ agent_tools.py        # 场景数据、排名、对比、证据检索
 │  ├─ agent_features.py     # 向导 / PoC / 组合算法与叙述 prompt
 │  ├─ agent_insights.py     # 证据索引、年度趋势、视频链接
-│  ├─ agent_web.py          # 可选 Bing 联网搜索（外部、默认关闭）
+│  ├─ agent_web.py          # 可选 SearXNG/Bing 联网搜索（外部、默认关闭）
+│  ├─ agent_uploads.py      # 文档/图片解析 + light/RAG-lite 路由
 │  ├─ agent_settings.py     # 模型配置、就绪检查、旧配置迁移
 │  ├─ agent_providers.py    # 后端解析与连通性测试
 │  ├─ agent_llm.py          # OpenAI 兼容 HTTP 客户端
@@ -267,8 +285,13 @@ OpenECRS/
 │  ├─ agent_ui_features.css
 │  ├─ agent_ui_data.py      # 重建 data.json + insights.json
 │  ├─ assets/               # 官方 Logo 图标 / 字标 / favicon
-│  └─ test_*.py             # 94 项测试
+│  └─ test_*.py             # 98 项测试
 ├─ skills/openecrs_agent.md # 人类可读的 Agent Skill 定义
+├─ mcp/                    # SearXNG 设置与可选 MCP 配置
+├─ vendor/searxng/         # 内置 SearXNG 源码（AGPL-3.0，无需 Docker）
+├─ scripts/run_searxng.sh  # 原生 SearXNG 启动脚本
+├─ prompts/                # 联网/全局 prompt 片段
+├─ uploads/                # 用户上传（gitignore）
 ├─ outputs/
 │  ├─ agent_ui/data.json
 │  ├─ agent_ui/insights.json
@@ -284,8 +307,8 @@ OpenECRS/
 
 ```bash
 cd code
-python -m unittest test_agent_tools test_agent_core test_agent_http test_agent_features test_agent_insights test_agent_web -v
-# 94 项
+python -m unittest test_agent_tools test_agent_core test_agent_http test_agent_features test_agent_insights test_agent_web test_agent_uploads -v
+# 98 项
 ```
 
 覆盖：离线工具、规划/作答校验（假 provider，含寒暄、视频路由、角色）、未配置 LLM 拒绝路径、HTTP 设置/测试/对话/模型切换/功能端点（mock OpenAI 端点）、向导/PoC/组合算法、洞察聚合、历史持久化，以及有浏览器时的 PDF 导出。
@@ -296,7 +319,7 @@ python -m unittest test_agent_tools test_agent_core test_agent_http test_agent_f
 
 - API Key 与本地模型路径仅保存在 `outputs/agent_ui/settings.json`（权限 `0600`），不会提交到仓库。
 - 历史对话、收藏、PDF 与日志保存在 `outputs/agent_ui/` 下，并已被 gitignore。
-- 无遥测、无分析、无 CDN；唯一外部请求是发往你配置的 LLM 端点；开启**联网搜索**时，搜索词还会发给 Bing，外部链接仅在你点击时打开。
+- 无遥测、无分析、无 CDN；唯一外部请求是发往你配置的 LLM 端点；开启**联网搜索**时，搜索词会发给本地 SearXNG（不可用时回退 Bing）。上传文件保存在 `uploads/`，已被 gitignore。
 - 界面由本机 Python HTTP 服务提供；不要在没有鉴权的情况下暴露到不可信网络。
 
 ---
@@ -315,7 +338,11 @@ python -m unittest test_agent_tools test_agent_core test_agent_http test_agent_f
 
 **为什么有些置信度很低？** 证据审查是规则影子审查、无人工金标；低置信度会如实展示，而不是隐藏。
 
+**上下文有多长？** 最近 24 轮对话、短文档全文或长文档 top-6 片段、最多 6 条证据、最多 5 条网页结果（含正文摘录）；作答最多 1500 tokens。
+
 **什么时候该开联网搜索？** 只有答案依赖 2026-11-20 快照之后的信息（新闻、竞品、监管、融资）时才开；纯证据/审计/离线场景保持关闭，网页结果不参与评分。
+
+**上传的文件会去哪？** 保存在本地 `./uploads`（已 gitignore）。短文档直接进上下文；长文档分片，只把相关片段发给 LLM；扫描 PDF 会 OCR，图片用 Tesseract。除发给 LLM 端点的上下文外，文件不会离开本机。
 
 ---
 

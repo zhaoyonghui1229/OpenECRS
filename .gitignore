@@ -14,3 +14,12 @@ outputs/agent_ui/pdf/
 .DS_Store
 outputs/agent_ui/workspace.json
 outputs/agent_ui/sessions.json
+uploads/
+chroma_db/
+*.pdf
+*.docx
+*.png
+*.jpg
+*.jpeg
+.searxng-venv/
+vendor/searxng/.venv/

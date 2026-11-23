@@ -66,7 +66,7 @@ class AgentRuntime:
 
     # ----------------------------------------------------------------- main
     def chat(self, message: str, session: dict | None = None, lang: str = "en",
-             role: str = "founder", web_search: bool = False) -> dict:
+             role: str = "founder", web_search: bool = False, extra_context: str = "") -> dict:
         session = session if session is not None else {}
         lang = lang if lang in ("en", "zh", "ja", "es", "fr", "de") else "en"
         role = role if role in ("founder", "enterprise", "investor", "pm") else "founder"
@@ -75,7 +75,7 @@ class AgentRuntime:
         started = time.time()
 
         web_enabled = bool(web_search)
-        plan, plan_meta = self._plan(provider, message, history, lang, role, web_enabled)
+        plan, plan_meta = self._plan(provider, message, history, lang, role, web_enabled, extra_context)
         plan["web_enabled"] = web_enabled
         tool_calls = self._tools_for(plan, message, web_enabled)
         tool_results = []
@@ -86,28 +86,28 @@ class AgentRuntime:
                 tool_results.append(self._web_tool(call["args"], lang, message))
             else:
                 tool_results.append(self.data.run_tool(call["name"], call["args"], lang))
-        answer_fields, answer_meta = self._respond(provider, message, plan, tool_results, lang, role)
+        answer_fields, answer_meta = self._respond(provider, message, plan, tool_results, lang, role, extra_context, history)
 
         answer = self._assemble(message, lang, plan, tool_calls, tool_results, answer_fields,
                                 plan_meta, answer_meta, started, role)
         history.extend([{"role": "user", "content": message},
-                        {"role": "assistant", "content": answer.get("advice", "")}])
-        session["history"] = history[-12:]
+                        {"role": "assistant", "content": (answer.get("advice", "") + " " + answer.get("reply", ""))[:1200]}])
+        session["history"] = history[-24:]
         session["last_answer"] = answer
         session["turns"] = int(session.get("turns", 0)) + 1
         return answer
 
     # --------------------------------------------------------------- steps
     def _plan(self, provider, message: str, history: list[dict], lang: str,
-              role: str = "founder", web_enabled: bool = False) -> tuple[dict, dict]:
+              role: str = "founder", web_enabled: bool = False, context: str = "") -> tuple[dict, dict]:
         catalog = self.data.catalog(lang)
         messages = [
             {"role": "system", "content": prompts.planner_system(catalog, lang, role, web_enabled)},
-            {"role": "user", "content": prompts.planner_user(message, history, lang)},
+            {"role": "user", "content": prompts.planner_user(message, history, lang, context)},
         ]
         last_error = ""
         for attempt in range(2):
-            result = provider.complete(messages, max_tokens=360, temperature=0.1)
+            result = provider.complete(messages, max_tokens=500, temperature=0.1)
             parsed = _json_object(result["content"])
             plan = self._normalise_plan(parsed, message, lang)
             if plan:
@@ -128,7 +128,8 @@ class AgentRuntime:
         synonyms = {"comparison": "compare", "evidence_only": "evidence", "scenario_analysis": "scenario",
                     "recommendation": "advice", "action": "advice", "overview": "overview",
                     "greeting": "smalltalk", "chat": "smalltalk", "chitchat": "smalltalk",
-                    "small_talk": "smalltalk", "smalltalk": "smalltalk"}
+                    "small_talk": "smalltalk", "smalltalk": "smalltalk",
+                    "general_question": "general", "other": "general", "knowledge": "general"}
         intent = synonyms.get(intent, intent)
         if intent not in INTENTS:
             intent = "overview"
@@ -200,6 +201,8 @@ class AgentRuntime:
             return [{"name": "videos", "args": {"scenario": keys[0] if keys else ""}}]
         if intent == "smalltalk":
             return []
+        if intent == "general" and not plan.get("tools"):
+            return []
         if intent in ("scenario", "advice") and not keys:
             keys = [self.data.ranked[0]["name"]]
         if intent == "compare" and len(keys) < 2:
@@ -261,14 +264,14 @@ class AgentRuntime:
         return unique[:4]
 
     def _respond(self, provider, message: str, plan: dict, tool_results: list[dict], lang: str,
-                 role: str = "founder"):
+                 role: str = "founder", context: str = "", history: list[dict] | None = None):
         messages = [
             {"role": "system", "content": prompts.responder_system(lang, role)},
-            {"role": "user", "content": prompts.responder_user(message, plan, tool_results, lang)},
+            {"role": "user", "content": prompts.responder_user(message, plan, tool_results, lang, context, history)},
         ]
         last_error = ""
         for attempt in range(2):
-            result = provider.complete(messages, max_tokens=900, temperature=0.3)
+            result = provider.complete(messages, max_tokens=1500, temperature=0.3)
             parsed = _json_object(result["content"])
             if parsed and str(parsed.get("advice") or "").strip():
                 fields = {
@@ -299,7 +302,7 @@ class AgentRuntime:
             keys = [self.data.ranked[0]["name"]]
         names = [self.data.display(k, lang) for k in keys]
 
-        smalltalk = intent == "smalltalk"
+        smalltalk = intent in ("smalltalk", "general")
         metrics = {} if smalltalk else {}
         for key in ([] if smalltalk else keys[:3]):
             scenario = self.data.scenario(key, lang)
@@ -312,6 +315,7 @@ class AgentRuntime:
         web = []
         web_note = ""
         web_error = ""
+        web_query = ""
         for call, result in zip(tool_calls, tool_results):
             if call["name"] in ("ranking", "catalog"):
                 ranking = self.data.ranking(lang)
@@ -329,6 +333,8 @@ class AgentRuntime:
                 web_note = result["web_note"]
             if result.get("web_error"):
                 web_error = result["web_error"]
+            if result.get("web_query"):
+                web_query = result["web_query"]
         if smalltalk:
             ranking, comparison, evidence, videos = [], [], [], []
         if comparison is None and intent == "compare" and len(keys) >= 2:
@@ -349,6 +355,8 @@ class AgentRuntime:
 
         if intent == "smalltalk":
             heading = {"zh": "你好", "ja": "こんにちは", "es": "Hola"}.get(lang, "Hello")
+        if intent == "general":
+            heading = fields["heading"] or {"zh": "回答", "ja": "回答", "es": "Respuesta"}.get(lang, "Answer")
         if intent == "video":
             heading = fields["heading"] or {"zh": "视频参考", "ja": "動画リファレンス", "es": "Vídeos relacionados"}.get(lang, "Video references")
         if intent == "ranking":
@@ -400,6 +408,7 @@ class AgentRuntime:
             "web": web[:6],
             "web_note": web_note,
             "web_error": web_error,
+            "web_query": web_query,
             "web_search_enabled": bool(plan.get("web_enabled")),
             "actions": fields["actions"],
             "risks": fields["risks"],

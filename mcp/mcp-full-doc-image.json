@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "searxng": {
+      "command": "npx",
+      "args": ["-y", "searxng-mcp-server"],
+      "env": { "SEARXNG_URL": "http://127.0.0.1:8889" }
+    },
+    "browser": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "document-parser": {
+      "command": "npx",
+      "args": ["-y", "document-parser-mcp"],
+      "env": { "WORK_DIR": "./uploads" }
+    },
+    "tesseract-ocr": {
+      "command": "npx",
+      "args": ["-y", "tesseract-mcp"],
+      "env": { "WORK_DIR": "./uploads", "DEFAULT_LANG": "chi_sim+eng" }
+    },
+    "rag": {
+      "command": "npx",
+      "args": ["-y", "rag-mcp-server"],
+      "env": {
+        "UPLOAD_DIR": "./uploads",
+        "CHROMA_PATH": "./chroma_db",
+        "EMBEDDING_MODEL": "all-MiniLM-L6-v2"
+      }
+    }
+  }
+}

@@ -6,7 +6,7 @@
 An LLM-required agent that turns public AI-tooling signals into auditable, prioritised product opportunities.</p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-94%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-98%20passing-brightgreen">
   <img alt="LLM required" src="https://img.shields.io/badge/LLM-required-blue">
   <img alt="languages" src="https://img.shields.io/badge/languages-EN%20%7C%20ZH%20%7C%20JA%20%7C%20ES-orange">
   <img alt="python" src="https://img.shields.io/badge/python-3.11%2B-3776AB">
@@ -68,7 +68,9 @@ The LLM is **mandatory**. Without a configured model the agent refuses to chat; 
 - **Multilingual & role-aware** — follows the system language, supports English / 中文 / 日本語 / Español, and answers from founder / enterprise / investor / PM perspectives. Language is locked per request, so answers cannot drift back to Chinese after switching.
 - **Persistent conversations** — history survives reloads and server restarts; search, rename and delete from the sidebar.
 - **Clean, collapsible UI** — official OpenECRS logo, responsive sidebar, model switcher, settings split into Model and Preferences.
-- **Optional web search** — an independent switch (off by default) for latest news / competitors / regulation. Web results are clearly labelled external, never mixed into the evidence scores.
+- **Optional web search** — an independent switch (off by default) for latest news / competitors / regulation. Primary provider is a local SearXNG instance; Bing HTML is the fallback. Web results are clearly labelled external, never mixed into the evidence scores.
+- **Document & image upload** — attach PDF/DOCX/TXT/MD/CSV or images; short documents go straight into context, long documents switch to chunked retrieval, images use Tesseract OCR. PDFs with no text layer are OCR'd.
+- **Longer conversation memory** — the responder now receives recent turns (not just the current question); session history keeps 24 turns and document context is expanded to 28k characters.
 - **Runs offline by default** — no build step, no CDN, no telemetry; only the configured LLM endpoint receives requests (plus your search query when web search is on).
 
 ### Design principles
@@ -109,7 +111,8 @@ More screenshots: [`docs/screenshots/`](docs/screenshots/) · sample PDFs: [`doc
 | **Scenario Deep-dive** | Opportunity scorecard, yearly trend, source mix, supply signals (repos/stars/papers/Show HN), evidence excerpts. |
 | **Saved Workspace** | Pin scenarios, add notes, and ask the agent to compare the saved shortlist. |
 | **Video search** | External YouTube/Bilibili search links per scenario (clearly labelled as external, not evidence). |
-| **Web search (optional)** | One switch for live news, competitors and regulation; results are Bing web pages, labelled external, and never folded into the evidence scores. |
+| **Web search (optional)** | One switch for live news, competitors and regulation; local SearXNG first, Bing fallback. Results are labelled external and never folded into the evidence scores. |
+| **Document & image upload** | PDF / DOCX / TXT / MD / CSV / images; automatic light vs RAG routing (4000-token threshold), OCR for images, snippets injected into the chat. |
 | **Chat** | Natural-language questions: ranking, scenario analysis, comparison, evidence requests, PoC planning, video requests, greetings. |
 | **PDF brief** | One-page A4 brief with advice, scorecard, evidence, actions, risks and scope. |
 
@@ -172,6 +175,19 @@ On first launch, open **Settings** and choose one of the two backends below. The
 
 Paste the key → **Test connection** → **Save**. Keys live only in `outputs/agent_ui/settings.json` (mode `0600`) and are sent only to the endpoint you configure. Environment variables `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` are also supported.
 
+### Optional: enable bundled SearXNG web search (no Docker)
+
+SearXNG source is vendored under `vendor/searxng/` (AGPL-3.0). Start it natively:
+
+```bash
+./scripts/run_searxng.sh        # creates .searxng-venv, installs deps, serves http://127.0.0.1:8889
+# verify: curl 'http://127.0.0.1:8889/search?q=test&format=json'
+```
+
+Requirements: Python 3.11+ and network access for the first dependency install. `mcp/searxng/settings.yml` controls engines (Bing / Baidu / DuckDuckGo), port and secret. No Docker needed.
+
+`agent_web.py` routes in this order: **news RSS** (Google News / Bing News) for current-events questions → **bundled SearXNG JSON** (8889, fallback 8888) → **Bing HTML**. Top pages are fetched and stripped to readable text, and every card exposes the exact URL. Set `SEARXNG_URL` to use another instance. Optional MCP configs live in `mcp/`.
+
 ### Option B — Local fine-tuned model
 
 ```bash
@@ -210,7 +226,7 @@ curl -s -X POST http://127.0.0.1:8765/api/pdf \
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/chat` | POST | `{session, message, lang, role, web_search}` → answer with advice, reply, metrics, ranking, comparison, evidence, videos, actions, risks, engine, trace |
+| `/api/chat` | POST | `{session, message, lang, role, web_search, attachment_id}` → answer with advice, reply, metrics, ranking, comparison, evidence, videos, actions, risks, engine, trace |
 | `/api/pdf` | POST | `{session, lang}` → `application/pdf` brief |
 | `/api/settings` | GET/POST | read (key masked) / create or update a model profile |
 | `/api/active` | POST | activate a model profile |
@@ -224,6 +240,7 @@ curl -s -X POST http://127.0.0.1:8765/api/pdf \
 | `/api/poc` | POST | PoC plan skeleton + optional narrative |
 | `/api/portfolio` | POST | team/budget portfolio allocation |
 | `/api/workspace` | GET/POST | saved scenarios and notes |
+| `/api/upload` | POST | `{name, data(base64)}` → parsed document/image metadata (`id`, `mode`, `tokens`, `preview`) |
 | `/api/sessions` | GET | conversation list (optional `q`) |
 | `/api/session` | GET/DELETE | read or delete one conversation |
 | `/api/session/rename` | POST | rename a conversation |
@@ -276,7 +293,8 @@ OpenECRS/
 │  ├─ agent_tools.py        # grounded scenario data, ranking, compare, evidence
 │  ├─ agent_features.py     # wizard / PoC / portfolio algorithms + narrative prompts
 │  ├─ agent_insights.py     # evidence index, yearly trends, video links
-│  ├─ agent_web.py          # optional Bing web search (external, opt-in)
+│  ├─ agent_web.py          # optional SearXNG/Bing web search (external, opt-in)
+│  ├─ agent_uploads.py      # document/image parsing + light/RAG-lite routing
 │  ├─ agent_settings.py     # model profiles, language/role-independent keys, readiness
 │  ├─ agent_providers.py    # provider resolution and connection test
 │  ├─ agent_llm.py          # OpenAI-compatible HTTP client
@@ -287,8 +305,13 @@ OpenECRS/
 │  ├─ agent_ui_features.css
 │  ├─ agent_ui_data.py      # rebuild data.json + insights.json
 │  ├─ assets/               # official logo mark / wordmark / favicons
-│  └─ test_*.py             # 94 tests
+│  └─ test_*.py             # 98 tests
 ├─ skills/openecrs_agent.md # human-readable Agent Skill definition
+├─ mcp/                    # SearXNG settings + optional MCP configs
+├─ vendor/searxng/         # bundled SearXNG source (AGPL-3.0, no Docker)
+├─ scripts/run_searxng.sh  # native SearXNG launcher
+├─ prompts/                # web-agent / global prompt fragments
+├─ uploads/                # user uploads (git-ignored)
 ├─ outputs/
 │  ├─ agent_ui/data.json    # compact UI dataset
 │  ├─ agent_ui/insights.json# yearly trends + source mix
@@ -304,8 +327,8 @@ OpenECRS/
 
 ```bash
 cd code
-python -m unittest test_agent_tools test_agent_core test_agent_http test_agent_features test_agent_insights test_agent_web -v
-# 94 tests
+python -m unittest test_agent_tools test_agent_core test_agent_http test_agent_features test_agent_insights test_agent_web test_agent_uploads -v
+# 98 tests
 ```
 
 Coverage: grounded tools, planner/responder validation with fake providers (including smalltalk, video routing and roles), LLM-required guard, HTTP settings/test/chat/profile/feature endpoints against a mock OpenAI endpoint, wizard/PoC/portfolio algorithms, insights aggregation, history persistence, and PDF export when a local browser is available.
@@ -316,7 +339,7 @@ Coverage: grounded tools, planner/responder validation with fake providers (incl
 
 - API keys and local model paths are stored locally in `outputs/agent_ui/settings.json` (mode `0600`); they are never committed.
 - Conversation history, saved workspace, generated PDFs and logs stay under `outputs/agent_ui/` and are git-ignored.
-- No telemetry, analytics or CDN requests. The only outbound request is to the LLM endpoint you configure; with **Web search** on, the search query is also sent to Bing, and external links open only when you click them.
+- No telemetry, analytics or CDN requests. The only outbound request is to the LLM endpoint you configure; with **Web search** on, the search query is also sent to your SearXNG instance (and Bing as fallback). Uploaded files stay under `uploads/` and are git-ignored.
 - The UI is served by a local Python HTTP server; do not expose it to untrusted networks without adding authentication.
 
 ---
@@ -335,7 +358,11 @@ Coverage: grounded tools, planner/responder validation with fake providers (incl
 
 **Why are some confidences low?** The evidence review is a rule-based shadow review without human gold labels; low confidence is reported rather than hidden.
 
+**How much context does the agent use?** Recent conversation (up to 24 turns), the full short document or top-6 retrieved chunks for long documents, up to 6 evidence quotes, and up to 5 web results with extracted page text. The responder can write up to 1500 tokens.
+
 **When should I enable Web search?** Only when the answer depends on something newer than the 2026-11-20 snapshot (news, competitors, regulation, funding). Keep it off for evidence-only, audit or offline work; web cards are external and never enter the scores.
+
+**What happens to uploaded files?** They stay in `./uploads` (git-ignored). Short documents are read into context; long documents are chunked and only relevant passages are sent to the LLM. PDFs with no text layer are OCR'd; images use Tesseract. No upload leaves the machine except the extracted context sent to your LLM endpoint.
 
 ---
 

@@ -191,6 +191,21 @@
   textarea{width:100%;border:none;outline:none;resize:none;background:transparent;font-family:var(--font);font-size:14px;line-height:1.6;color:var(--ink);max-height:150px;padding:2px 2px}
   textarea::placeholder{color:var(--faint)}
   .input-row{display:flex;align-items:flex-end;gap:10px}
+  .clear-input{flex:0 0 auto;width:26px;height:26px;border-radius:7px;color:var(--faint);font-size:14px;align-self:center}
+  .clear-input:hover{background:var(--soft);color:var(--ink)}
+  .msg.user{position:relative}
+  .copy-user{position:absolute;right:6px;bottom:3px;width:20px;height:18px;border-radius:5px;color:var(--faint);font-size:11px;opacity:.45;transition:.15s;background:var(--panel)}
+  .msg.user:hover .copy-user{opacity:1}
+  .copy-user:hover{background:var(--line);color:var(--ink)}
+  .attach-btn{flex:0 0 auto;width:36px;height:36px;border-radius:9px}
+  .attach-btn svg{width:16px;height:16px}
+  .attach-chip{display:flex;align-items:center;gap:7px;margin:0 0 8px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--soft);font-size:11.5px;color:var(--muted)}
+  .attach-chip[hidden]{display:none}
+  .attach-ico{color:var(--faint)}
+  .attach-name{color:var(--ink);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .attach-meta{color:var(--faint);font-size:10.5px}
+  .attach-remove{margin-left:auto;width:20px;height:20px;border-radius:5px;color:var(--faint);font-size:13px}
+  .attach-remove:hover{background:var(--line);color:var(--ink)}
   .model-pick{position:relative;flex:0 0 auto}
   .composer-model{display:inline-flex;align-items:center;gap:5px;padding:7px 9px;border:1px solid var(--line-strong);border-radius:9px;background:var(--panel);font-size:11.5px;color:var(--muted);max-width:170px}
   .composer-model:hover{background:var(--soft)}
@@ -577,8 +592,19 @@
     <div class="composer-wrap">
       <div class="composer">
         <div class="chips" id="chips"></div>
+        <div class="attach-chip" id="attachChip" hidden>
+          <span class="attach-ico">▤</span>
+          <span class="attach-name" id="attachName"></span>
+          <span class="attach-meta" id="attachMeta"></span>
+          <button class="attach-remove" id="attachRemove" aria-label="Remove attachment">×</button>
+        </div>
         <div class="input-row">
+          <button class="icon-btn attach-btn" id="uploadBtn" title="Attach a document or image">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7L14 4.5a3.5 3.5 0 1 1 5 5L10 18.5a2 2 0 0 1-3-3l8-8"/></svg>
+          </button>
+          <input type="file" id="fileInput" hidden accept=".pdf,.docx,.txt,.md,.markdown,.csv,.png,.jpg,.jpeg,.bmp,.tif,.tiff">
           <textarea id="input" rows="1" placeholder="Ask a question, or pick a suggestion above…"></textarea>
+          <button class="clear-input" id="clearInput" title="Clear input" hidden>×</button>
           <button class="composer-model" id="composerModelBtn" title="Switch model">
             <span id="composerModelLabel">model</span>
             <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -626,6 +652,7 @@ const thread = $('thread'), inner = $('threadInner');
 let SESSION = (crypto.randomUUID ? crypto.randomUUID() : 's-' + Date.now());
 let LAST_ANSWER = null;
 let SETTINGS = null;
+let ATTACHMENT = null;
 let CURRENT_BACKEND = 'api';
 let EDITING_ID = null;
 let ADDING_PROFILE = false;
@@ -658,7 +685,9 @@ const I18N = {
     profileMenuTitle: 'Models', addModel: '+ Add model', manageModels: 'Settings',
     historyLabel: 'Recent chats', noHistory: 'No conversations yet.', noResults: 'No matching conversations.',
     aboutLabel: 'About data', answerSettingsLabel: 'Answer settings',
-    webTitle: 'Web search', webOn: 'Web on', webOff: 'Web off',
+    attachTitle: 'Attach a document or image', attachReading: 'Reading file…',
+    attachReady: (n, mode) => `Attached ${n} (${mode})`, attachError: 'Upload failed: ',
+    attachRemove: 'Remove attachment', webTitle: 'Web search', webOn: 'Web on', webOff: 'Web off',
     webHint: 'Off by default. Turn on for latest news, competitors, regulation or anything after the 2026-11-20 snapshot. Queries are sent to an external search engine (Bing); results are labelled external web, not evidence. Turn off for evidence-only, audit or offline work.',
     webSourcesTitle: 'Web sources (external)', webExternal: 'External web page — verify before use',
     webEnabledToast: 'Web search enabled — results will be labelled external.',
@@ -765,7 +794,9 @@ const I18N = {
     profileMenuTitle: '模型', addModel: '+ 添加模型', manageModels: '设置',
     historyLabel: '历史对话', noHistory: '还没有历史对话。', noResults: '没有匹配的对话。',
     aboutLabel: '数据说明', answerSettingsLabel: '回答设置',
-    webTitle: '联网搜索', webOn: '联网开', webOff: '联网关',
+    attachTitle: '上传文档或图片', attachReading: '正在读取文件…',
+    attachReady: (n, mode) => `已附加 ${n}（${mode}）`, attachError: '上传失败：',
+    attachRemove: '移除附件', webTitle: '联网搜索', webOn: '联网开', webOff: '联网关',
     webHint: '默认关闭。需要最新新闻、竞品、监管或 2026-11-20 快照之后的动态时再开启；搜索词会发送给外部搜索引擎（Bing），结果会标注为外部网页、不是证据库内容。纯证据/审计/离线场景请保持关闭。',
     webSourcesTitle: '外部网页来源（需自行核实）', webExternal: '外部网页，引用前请核实',
     webEnabledToast: '联网搜索已开启——结果会标注为外部网页。',
@@ -920,6 +951,23 @@ const T = Object.assign({}, I18N.en, I18N[LANG] || {});
 function t(key, ...args) {
   const v = T[key];
   return typeof v === 'function' ? v(...args) : v;
+}
+
+async function copyText(text){
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (err) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  }
 }
 
 function esc(s){return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -1187,7 +1235,10 @@ function setChips(list){
 function addUser(text){
   const el = document.createElement('div');
   el.className = 'msg user';
-  el.innerHTML = `<div class="bubble">${esc(text)}</div>`;
+  el.innerHTML = `<div class="bubble">${esc(text)}</div><button class="copy-user" title="Copy input">⧉</button>`;
+  const btn = el.querySelector('.copy-user');
+  const raw = text.split('\n▤ ')[0];
+  btn.onclick = async () => { const ok = await copyText(raw); showToast(ok ? t('copied') : t('copyFail')); };
   inner.classList.remove('empty');
   inner.appendChild(el);
   scrollBottom();
@@ -1272,18 +1323,17 @@ function evidenceList(list, limit = 3){
   return html + '</div>';
 }
 
-function webList(list, note, error){
+function webList(list, note, error, query){
   if ((!list || !list.length) && !error) return '';
   const cards = (list || []).map(item => {
-    let host = '';
-    try { host = new URL(item.url).hostname; } catch (e) { host = item.url || ''; }
+    const body = item.content || item.snippet || '';
     return `<a class="web-item" href="${esc(item.url)}" target="_blank" rel="noopener">
       <span class="web-title">${esc(item.title)}</span>
-      <span class="web-url">${esc(host)}</span>
-      ${item.snippet ? `<span class="web-snip">${esc(item.snippet)}</span>` : ''}
+      <span class="web-url">${esc(item.url || '')}</span>
+      ${body ? `<span class="web-snip">${esc(body.slice(0, 360))}</span>` : ''}
     </a>`;
   }).join('');
-  return `<div class="sec"><div class="sec-title">${t('webSourcesTitle')}</div>
+  return `<div class="sec"><div class="sec-title">${t('webSourcesTitle')}${query ? ' · ' + esc(query) : ''}</div>
     ${note ? `<p class="reply">${esc(note)}</p>` : ''}
     ${error ? `<p class="reply">${esc(error)}</p>` : ''}
     <div class="web-list">${cards}</div></div>`;
@@ -1330,7 +1380,7 @@ function renderAnswer(a, restore){
   let html = `<div class="msg assistant"><div class="avatar avatar-logo" aria-hidden="true"></div><div class="msg-body">
     <div class="msg-head">OpenECRS · ${esc(a.heading || t('answer'))} · ${now()} ${engTag}</div>
     <div class="card">`;
-  if (a.kind === 'smalltalk') {
+  if (a.kind === 'smalltalk' || a.kind === 'general') {
     html += `<div class="reply" style="margin:0;color:var(--ink);font-size:14px">${esc(a.advice)}</div>`;
     if (a.reply) html += `<p class="reply">${esc(a.reply)}</p>`;
   } else {
@@ -1350,13 +1400,13 @@ function renderAnswer(a, restore){
   if (single) html += metricsTable(single);
   if (a.evidence && a.evidence.length) html += evidenceList(a.evidence);
   if (a.videos && a.videos.length) html += videoList(a.videos);
-  if ((a.web && a.web.length) || a.web_error) html += webList(a.web || [], a.web_note, a.web_error);
-  if (a.kind !== 'smalltalk') {
+  if ((a.web && a.web.length) || a.web_error) html += webList(a.web || [], a.web_note, a.web_error, a.web_query);
+  if (a.kind !== 'smalltalk' && a.kind !== 'general') {
     if (a.actions && a.actions.length) html += actionList(a.actions, t('actionsTitle'));
     if (a.risks && a.risks.length) html += actionList(a.risks, t('risksTitle'));
   }
   html += traceBlock(a);
-  if (a.kind !== 'smalltalk') {
+  if (a.kind !== 'smalltalk' && a.kind !== 'general') {
     html += `<div class="msg-actions">
         <button class="btn primary" data-pdf>${t('exportBrief')}</button>
         <button class="btn" data-copy>${t('copyBtn')}</button>
@@ -1401,12 +1451,12 @@ async function send(text){
   $('send').disabled = true;
   $('input').value = '';
   $('input').style.height = 'auto';
-  addUser(message);
+  addUser(message + (ATTACHMENT ? '\n▤ ' + ATTACHMENT.name : ''));
   addTyping();
   try {
     const {res, data} = await fetchJSON('/api/chat', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({session: SESSION, message, lang: LANG, role: currentRole(), web_search: webEnabled()})
+      body: JSON.stringify({session: SESSION, message, lang: LANG, role: currentRole(), web_search: webEnabled(), attachment_id: ATTACHMENT ? ATTACHMENT.id : ''})
     });
     removeTyping();
     if (!res.ok || data.error) {
@@ -1464,10 +1514,12 @@ async function exportPDF(cardNode){
   }
 }
 
-function copyAnswer(a, btn){
-  navigator.clipboard.writeText(t('copyTemplate', a)).then(() => {
-    const old = btn.textContent; btn.textContent = t('copied'); setTimeout(() => btn.textContent = old, 1200);
-  }).catch(() => alert(t('copyFail')));
+async function copyAnswer(a, btn){
+  const ok = await copyText(t('copyTemplate', a));
+  const old = btn.textContent;
+  btn.textContent = ok ? t('copied') : t('copyFail');
+  showToast(ok ? t('copied') : t('copyFail'));
+  setTimeout(() => { btn.textContent = old; }, 1200);
 }
 
 let SIDEBAR_SCENARIOS = [];
@@ -1703,6 +1755,10 @@ $('input').addEventListener('keydown', (e) => {
 $('input').addEventListener('input', (e) => {
   e.target.style.height = 'auto';
   e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+  if ($('clearInput')) $('clearInput').hidden = !e.target.value;
+});
+$('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && e.target.value) { e.target.value = ''; $('clearInput').hidden = true; }
 });
 document.querySelectorAll('#backendTabs button').forEach(b => b.addEventListener('click', () => setBackend(b.dataset.backend)));
 $('answerSettingsBtn').onclick = () => { closeProfilePopover(); openSettings(false); setSettingsTab('prefs'); };
@@ -1840,6 +1896,10 @@ $('historySearch').oninput = () => {
   historyTimer = setTimeout(refreshHistory, 250);
 };
 $('langSelect').onchange = () => switchLang($('langSelect').value);
+$('clearInput').onclick = () => { $('input').value = ''; $('clearInput').hidden = true; $('input').focus(); };
+$('uploadBtn').onclick = () => $('fileInput').click();
+$('fileInput').onchange = () => uploadFile($('fileInput').files[0]);
+$('attachRemove').onclick = () => { ATTACHMENT = null; renderAttachment(); };
 $('webBtn').onclick = () => setWebEnabled(!webEnabled());
 $('webToggle').onchange = () => setWebEnabled($('webToggle').checked);
 $('roleSelect').onchange = () => {
@@ -1862,6 +1922,39 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeModelMenu(); closeAbout(); closeProfilePopover(); } });
 window.addEventListener('resize', closeModelMenu);
 window.addEventListener('scroll', closeModelMenu, true);
+
+function renderAttachment(){
+  const chip = $('attachChip');
+  if (!chip) return;
+  if (!ATTACHMENT) { chip.hidden = true; return; }
+  chip.hidden = false;
+  $('attachName').textContent = ATTACHMENT.name;
+  $('attachMeta').textContent = (ATTACHMENT.mode === 'rag' ? 'RAG' : 'Light') + ' · ' + (ATTACHMENT.tokens || 0) + ' tokens';
+}
+
+async function uploadFile(file){
+  if (!file) return;
+  showToast(t('attachReading'));
+  try {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('read failed'));
+      reader.readAsDataURL(file);
+    });
+    const res = await fetch('/api/upload', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: file.name, data})});
+    const payload = await res.json();
+    if (!res.ok || payload.error) throw new Error(payload.error || res.status);
+    ATTACHMENT = payload;
+    renderAttachment();
+    showToast(t('attachReady', payload.name, payload.mode === 'rag' ? 'RAG' : 'Light'));
+  } catch (err) {
+    showToast(t('attachError') + (err.message || err));
+  } finally {
+    if ($('fileInput')) $('fileInput').value = '';
+  }
+}
 
 function webEnabled(){
   return localStorage.getItem('openecrs-web') === '1';

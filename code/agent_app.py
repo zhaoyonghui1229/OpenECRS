@@ -300,6 +300,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         body = self._read_json()
         try:
+            if path == "/api/upload":
+                return self._upload(body)
             if path == "/api/chat":
                 return self._chat(body)
             if path == "/api/pdf":
@@ -326,6 +328,24 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "not found"})
 
     # -------------------------------------------------------------- handlers
+    def _upload(self, body: dict):
+        try:
+            import agent_uploads
+        except ImportError:
+            return self._json(503, {"error": "upload module not available"})
+        try:
+            record = agent_uploads.save_upload(str(body.get("name") or ""),
+                                               str(body.get("data") or ""))
+            parsed = agent_uploads.parse_upload(record["id"])
+        except agent_uploads.UploadError as exc:
+            return self._json(400, {"error": str(exc)})
+        log_event(route="/api/upload", ok=True, name=parsed["name"], ext=parsed["ext"],
+                  mode=parsed["mode"], tokens=parsed["tokens"], size=parsed["size"])
+        return self._json(200, {"id": parsed["id"], "name": parsed["name"], "ext": parsed["ext"],
+                                "size": parsed["size"], "chars": parsed["chars"],
+                                "tokens": parsed["tokens"], "mode": parsed["mode"],
+                                "preview": parsed.get("preview", "")[:600]})
+
     def _chat(self, body: dict):
         message = str(body.get("message") or "").strip()
         if not message:
@@ -336,6 +356,16 @@ class Handler(BaseHTTPRequestHandler):
         if role not in ("founder", "enterprise", "investor", "pm"):
             role = "founder"
         web_search = bool(body.get("web_search"))
+        attachment_id = str(body.get("attachment_id") or "")
+        attachment_context = ""
+        attachment_info = None
+        if attachment_id:
+            try:
+                import agent_uploads
+                attachment_info = agent_uploads.build_context(attachment_id, message)
+                attachment_context = attachment_info["context"]
+            except Exception as exc:
+                return self._json(400, {"error": "Attachment could not be read: " + str(exc)[:160]})
         settings = agent_settings.load_settings()
         public = agent_settings.public_settings()
         if not public["ready"]:
@@ -348,7 +378,8 @@ class Handler(BaseHTTPRequestHandler):
         state = _session(session_id)
         try:
             runtime = agent_core.AgentRuntime(settings, get_data())
-            answer = runtime.chat(message, state, lang=lang, role=role, web_search=web_search)
+            answer = runtime.chat(message, state, lang=lang, role=role, web_search=web_search,
+                                 extra_context=attachment_context)
         except agent_providers.LLMRequiredError as exc:
             log_event(route="/api/chat", ok=False, error=str(exc), message=message[:120])
             return self._json(428, {"error": str(exc), "hint": exc.hint, "code": "llm_required"})
@@ -369,6 +400,8 @@ class Handler(BaseHTTPRequestHandler):
                   latency_ms=(answer.get("engine") or {}).get("latency_ms"),
                   web_search=web_search, web_results=len(answer.get("web") or []),
                   message=message[:120])
+        if attachment_info:
+            answer["attachment"] = {k: attachment_info.get(k) for k in ("id", "name", "mode", "tokens", "chars")}
         return self._json(200, answer)
 
     def _evidence(self, query: dict):

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-INTENTS = ("overview", "ranking", "scenario", "compare", "evidence", "advice", "smalltalk", "video")
+INTENTS = ("overview", "ranking", "scenario", "compare", "evidence", "advice", "smalltalk", "video", "general")
 TOOL_NAMES = ("catalog", "ranking", "scenario", "compare", "evidence", "search", "meta", "videos", "web_search")
 
 
@@ -93,11 +93,14 @@ def planner_system(catalog: list[dict], lang: str = "en", role: str = "founder",
         return (
             f"{skill_text(lang)}\n\n"
             "你现在处于【规划阶段】。根据问题和场景目录，输出严格 JSON（不要 Markdown、不要代码块、不要多余文字）：\n"
-            '{"intent": "overview|ranking|scenario|compare|evidence|advice|smalltalk|video", '
+            '{"intent": "overview|ranking|scenario|compare|evidence|advice|smalltalk|video|general", '
             '"scenarios": ["场景id"], "focus": "value|feasibility|gap|demand|risk|action|none", '
             '"tools": [{"name": "catalog|ranking|scenario|compare|evidence|search|meta", "args": {}}], '
             '"reason": "一句话规划理由"}\n'
-            "规则：问候/自我介绍/感谢/闲聊 → intent=smalltalk 且 tools=[]（不做机会推荐，不要提意图/工具/工作流）；"
+            "规则：先理解用户真正问的问题，不要把所有问题都硬套成场景推荐。"
+            "问候/自我介绍/感谢/闲聊 → intent=smalltalk 且 tools=[]（不做机会推荐，不要提意图/工具/工作流）；"
+            "与 12 个 AI 场景无关的普通问题、概念解释、方法论、写作/翻译/代码/闲聊追问 → intent=general 且 tools=[]；"
+            "只有确实涉及 AI 应用场景的机会/证据/对比/排名/计划时才选对应场景意图；"
             "视频/看视频/推荐视频 → intent=video 且 tools=[{\"name\":\"videos\",\"args\":{}}]（可带场景）；"
             "如果 web_enabled=true，遇到最新新闻/竞品/监管/快照之后的动态可调用 "
             "{\"name\":\"web_search\",\"args\":{\"query\":\"搜索词\"}}；web_enabled=false 时不要调用，"
@@ -112,12 +115,15 @@ def planner_system(catalog: list[dict], lang: str = "en", role: str = "founder",
         f"{skill_text(lang)}\n\n"
         "You are in the PLANNING phase. Given the question and scenario catalog, return strict JSON "
         "(no Markdown, no code fences, no extra text):\n"
-        '{"intent": "overview|ranking|scenario|compare|evidence|advice|smalltalk|video", '
+        '{"intent": "overview|ranking|scenario|compare|evidence|advice|smalltalk|video|general", '
         '"scenarios": ["scenario id"], "focus": "value|feasibility|gap|demand|risk|action|none", '
         '"tools": [{"name": "catalog|ranking|scenario|compare|evidence|search|meta", "args": {}}], '
         '"reason": "one-line planning rationale"}\n'
-        "Rules: greetings / self-introduction / thanks / chit-chat -> intent=smalltalk and tools=[] "
-        "(do NOT pitch a scenario and never mention intent/tools/workflow); "
+        "Rules: first understand what the user actually asked; do not force every question into a scenario. "
+        "greetings / self-introduction / thanks / chit-chat -> intent=smalltalk and tools=[] "
+        "(do NOT pitch a scenario and never mention intent/tools/workflow); general knowledge / definitions / "
+        "methodology / writing / translation / code / unrelated follow-ups -> intent=general and tools=[]; "
+        "only use scenario intents when the question really concerns AI opportunity, evidence, comparison, ranking or planning; "
         "video / watch / recommend videos -> intent=video and tools=[{\"name\":\"videos\",\"args\":{}}] "
         "(scenario optional); if web_enabled=true you may call {\"name\":\"web_search\",\"args\":{\"query\":\"...\"}} "
         "for latest news / competitors / regulation / anything after the snapshot; when web_enabled=false do not call it "
@@ -129,12 +135,16 @@ def planner_system(catalog: list[dict], lang: str = "en", role: str = "founder",
     )
 
 
-def planner_user(question: str, history: list[dict], lang: str = "en") -> str:
-    transcript = "\n".join(f"{m.get('role')}: {m.get('content')}" for m in history[-6:]) or "(none)"
+def planner_user(question: str, history: list[dict], lang: str = "en", context: str = "") -> str:
+    transcript = "\n".join(f"{m.get('role')}: {m.get('content')}" for m in history[-12:]) or "(none)"
+    attached = ""
+    if context:
+        attached = ("\n\n[Attached document context — use it to answer the current question]\n"
+                    + context[:28000])
     if lang == "zh":
-        return (f"最近对话：\n{transcript}\n\n当前问题：{question}\n"
+        return (f"最近对话：\n{transcript}\n\n当前问题：{question}{attached}\n"
                 f"无论历史对话使用什么语言，本次输出只能使用{_language(lang)}。")
-    return (f"Recent conversation:\n{transcript}\n\nCurrent question: {question}\n"
+    return (f"Recent conversation:\n{transcript}\n\nCurrent question: {question}{attached}\n"
             f"Regardless of the language used in the conversation above, answer ONLY in {_language(lang)}.")
 
 
@@ -148,6 +158,10 @@ def responder_system(lang: str = "en", role: str = "founder") -> str:
             "如果 intent 是 smalltalk：像产品向导一样自然回应。advice 用一句友好问候；reply 用 2-3 句说明你能帮什么"
             "（选方向、做对比、查证据、出 PoC、看视频），并给 2-3 个可以直接问的例子。"
             "严禁出现“意图/smalltalk/工具/工作流/未调用/评分公式/AHP/权重”等内部术语；不要推荐具体场景；actions/risks 为空。"
+            "如果用户消息包含 attached_document_context：优先依据该文档内容回答，引用原文片段，"
+            "不要编造文档不存在的信息；文档内容与证据库冲突时明确说明两者来源不同。"
+            "如果 intent 是 general：直接、准确回答用户真正问的问题，不要强行推荐场景或套用评分框架；"
+            "不知道就说明不知道；如问题超出证据库范围，可以基于你的通用知识回答并说明这不是证据库结论。"
             "如果工具结果包含 web：这些是外部网页，不是证据库；请单独标注“外部网页（需自行核实）”并给出链接，"
             "不得把网页数字混入评分或排名；"
             "场景名称必须使用工具结果里的本地化名称，不要直接输出中文场景 id；如果只有 id，就翻译成目标语言或使用英文名；"
@@ -167,6 +181,12 @@ def responder_system(lang: str = "en", role: str = "founder") -> str:
         "`reply` is 2-3 sentences on what you can help with (choose a direction, compare scenarios, verify "
         "evidence, draft a PoC, watch videos) plus 2-3 example questions. Never mention intent, tools, workflow, "
         "classification, or scoring formulas; do not pitch a specific scenario; actions/risks stay empty. "
+        "If the user message contains attached_document_context: answer from that document first, quote the "
+        "relevant passage, and never invent content that is not in the document; if it conflicts with the evidence "
+        "base, say that the sources differ. "
+        "If intent is general: answer the user's actual question directly and accurately; do NOT force a scenario "
+        "recommendation or a scoring framework. If you do not know, say so; if it is outside the evidence base, "
+        "you may answer from general knowledge and state that it is not an evidence-base conclusion. "
         "If tool results contain web: label them as external web pages (verify before use), cite URLs, and never "
         "mix web numbers into scores or rankings. Scenario names must use the localized names from tool results; "
         "never emit raw Chinese scenario ids in non-Chinese answers — translate them or use the English name. "
@@ -179,12 +199,16 @@ def responder_system(lang: str = "en", role: str = "founder") -> str:
     )
 
 
-def responder_user(question: str, plan: dict, tool_results: list[dict], lang: str = "en") -> str:
+def responder_user(question: str, plan: dict, tool_results: list[dict], lang: str = "en",
+                   context: str = "", history: list[dict] | None = None) -> str:
     payload = {
         "question": question,
         "plan": plan,
         "tool_results": tool_results,
+        "recent_conversation": (history or [])[-8:],
     }
+    if context:
+        payload["attached_document_context"] = context[:28000]
     if lang == "zh":
         return "请基于以下数据作答（只使用这些数据）：\n" + json.dumps(payload, ensure_ascii=False, indent=1)
     return "Answer from this data only:\n" + json.dumps(payload, ensure_ascii=False, indent=1)
@@ -193,6 +217,8 @@ def responder_user(question: str, plan: dict, tool_results: list[dict], lang: st
 def chips_for(intent: str, lang: str = "en") -> list[str]:
     if lang == "zh":
         return {
+            "general": ["你能做什么？", "解释一下 AHP 是什么", "怎么设计一个 2 周 PoC？",
+                        "哪个场景最值得优先做？"],
             "video": ["看知识管理与文档问答的视频", "哪个场景最值得优先做？", "给我一个 2 周 PoC 方案", "对比 安全合规 和 多智能体"],
             "smalltalk": ["哪个场景最值得优先做？", "对比 安全合规 和 多智能体",
                           "知识管理与文档问答 的证据", "给我一个 2 周 PoC 方案"],
@@ -210,6 +236,8 @@ def chips_for(intent: str, lang: str = "en") -> list[str]:
                        "给我一个 2 周 PoC 方案"],
         }.get(intent, ["哪个场景最值得优先做？", "对比 安全合规 和 多智能体"])
     return {
+        "general": ["What can you do?", "Explain what AHP means", "How should I design a 2-week PoC?",
+                    "Which scenario should we prioritise?"],
         "video": ["Show videos for Knowledge Management & Document QA", "Which scenario should we prioritise?",
                  "Give me a 2-week PoC plan", "Compare Security, Compliance & Privacy vs Multi-agent"],
         "smalltalk": ["Which scenario should we prioritise?",

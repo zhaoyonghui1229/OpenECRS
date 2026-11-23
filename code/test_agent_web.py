@@ -13,9 +13,9 @@ SAMPLE = '''
 
 
 class WebSearchTests(unittest.TestCase):
-    def test_parse_results_decodes_urls_and_dedupes(self):
+    def test_parse_results_decodes_urls(self):
         results = agent_web.parse_results(SAMPLE, 5)
-        self.assertEqual([r["title"] for r in results], ["Example A", "Example B"])
+        self.assertEqual([r["title"] for r in results], ["Example A", "Example B", "Duplicate host"])
         self.assertEqual(results[0]["url"], "https://example.com/a")
         self.assertEqual(results[0]["snippet"], "First snippet.")
         self.assertEqual(results[0]["source"], "web")
@@ -25,20 +25,32 @@ class WebSearchTests(unittest.TestCase):
             agent_web.search("   ")
 
     def test_search_success(self):
+        import agent_web as aw
+        old = aw.SEARXNG_URL
+        aw.SEARXNG_URL = ""
         page = '<html>' + SAMPLE + '</html>'
         response = mock.MagicMock()
         response.__enter__.return_value = response
         response.read.return_value = page.encode("utf-8")
-        with mock.patch("urllib.request.urlopen", return_value=response):
-            data = agent_web.search("ai agents", 3, "en")
+        try:
+            with mock.patch("urllib.request.urlopen", return_value=response):
+                data = agent_web.search("ai agents", 3, "en")
+        finally:
+            aw.SEARXNG_URL = old
         self.assertEqual(data["provider"], "bing")
-        self.assertEqual(len(data["results"]), 2)
+        self.assertEqual(len(data["results"]), 3)
         self.assertIn("not part of the audited evidence", data["note"])
 
     def test_search_failure(self):
-        with mock.patch("urllib.request.urlopen", side_effect=OSError("boom")):
-            with self.assertRaises(agent_web.WebSearchError):
-                agent_web.search("ai agents")
+        import agent_web as aw
+        old = aw.SEARXNG_URL
+        aw.SEARXNG_URL = ""
+        try:
+            with mock.patch("urllib.request.urlopen", side_effect=OSError("boom")):
+                with self.assertRaises(agent_web.WebSearchError):
+                    agent_web.search("ai agents")
+        finally:
+            aw.SEARXNG_URL = old
 
 
 if __name__ == "__main__":

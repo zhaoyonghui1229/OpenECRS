@@ -1,0 +1,23 @@
+use_default_settings:
+  engines:
+    keep_only:
+      - bing
+      - baidu
+      - duckduckgo
+
+general:
+  debug: false
+  instance_name: "Agent SearXNG"
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "127.0.0.1"
+  port: 8889
+  secret_key: "6a23b3806a2a4bf0fe2d1ae65060ca6f7270b73e6665de7cf82b4310d2449252"
+  limiter: false
+  public_instance: false
